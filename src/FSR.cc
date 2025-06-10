@@ -36,7 +36,6 @@ class INET_API FSR : public RoutingProtocolBase, public UdpSocket::ICallback, pu
 {
     private:
         double updateInterval = 1.0;
-        int scope = 0;
 
         ModuleRefByPar<IRoutingTable> routingTable;
         UdpSocket socket;
@@ -45,13 +44,14 @@ class INET_API FSR : public RoutingProtocolBase, public UdpSocket::ICallback, pu
         std::unordered_map<int, std::unordered_set<int>> neighbors;
 
         cMessage *updateMsgTimer = nullptr;
+        int updateMsgTimerCounter = 0;
 
         void sendPacket(const Ptr<FSRControlPacket>& controlPacket);
         void clearState();
         L3Address getSelfIPAddress() const;
 
         void printNeighbors();
-        const Ptr<FSRUpdatePacket> createUpdatePacket();
+        const Ptr<FSRUpdatePacket> createUpdatePacket(int scope);
         void handleUpdatePacket(const Ptr<const FSRUpdatePacket>& updatePacket);
 
     protected:
@@ -91,7 +91,6 @@ void FSR::initialize(int stage)
 
     if (stage == INITSTAGE_LOCAL) {
         this->updateInterval = par("updateInterval").doubleValue();
-        this->scope = par("scope").intValue();
 
         this->routingTable.reference(this, "routingTableModule", true);
 
@@ -153,9 +152,18 @@ void FSR::handleMessageWhenUp(cMessage *msg)
     if (!msg->isSelfMessage()) this->socket.processMessage(msg);
 
     if (msg == this->updateMsgTimer) {
-        auto packet = createUpdatePacket();
+        int scope = 1;
+        if (this->updateMsgTimerCounter % 10 == 0) {
+            scope = 2;
+            this->updateMsgTimerCounter = 0;
+        }
+
+        auto packet = createUpdatePacket(scope);
 
         sendPacket(packet);
+
+        this->updateMsgTimerCounter++;
+        scheduleAfter(this->updateInterval, this->updateMsgTimer);
     }
 }
 
@@ -200,7 +208,7 @@ void FSR::sendPacket(const Ptr<FSRControlPacket>& controlPacket) {
     }
 }
 
-const Ptr<FSRUpdatePacket> FSR::createUpdatePacket()
+const Ptr<FSRUpdatePacket> FSR::createUpdatePacket(int scope)
 {
     auto updatePacket = makeShared<FSRUpdatePacket>();
     updatePacket->setPacketType(FSRControlPacketType::UPDATE);
@@ -208,6 +216,10 @@ const Ptr<FSRUpdatePacket> FSR::createUpdatePacket()
 
     std::vector<FSRRoute> routes;
     for (const auto& neighbor : this->neighbors) {
+        if (scope == 1 && neighbor.first != this->selfNumber) {
+            continue; // Only include self's neighbors for scope 1
+        }
+
         for (const auto& n : neighbor.second) {
             FSRRoute route;
             route.source = neighbor.first;
@@ -215,6 +227,7 @@ const Ptr<FSRUpdatePacket> FSR::createUpdatePacket()
             routes.push_back(route);
         }
     }
+
     updatePacket->setRoutesArraySize(routes.size());
     for (size_t i = 0; i < routes.size(); ++i) {
         updatePacket->setRoutes(i, routes[i]);
