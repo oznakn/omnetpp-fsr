@@ -15,7 +15,13 @@ class FSRControlPacket extends FieldsChunk
     FSRControlPacketType packetType = static_cast<FSRControlPacketType>(-1);
 }
 
+struct FSRRoute
+{
+    int source;
+    int target;
+}
+
 class FSRUpdatePacket extends FSRControlPacket
 {
-    std::unordered_map<std::string, std::unordered_set<std::string>> neighbors;
+    FSRRoute routes[];
 }

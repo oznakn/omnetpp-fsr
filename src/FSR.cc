@@ -35,24 +35,24 @@ namespace inet {
 class INET_API FSR : public RoutingProtocolBase, public UdpSocket::ICallback, public cListener
 {
     private:
-        const IL3AddressType *addressType = nullptr;
-
         double updateInterval = 1.0;
         int scope = 0;
 
         ModuleRefByPar<IRoutingTable> routingTable;
         UdpSocket socket;
 
-        std::unordered_set<std::string> neighbors;
-        std::unordered_map<std::string, int> nodeDist;
-        std::unordered_map<std::string, std::string> nodeNextHop;
-        std::unordered_map<std::string, std::unordered_set<std::string>> nodeNeighbors;
+        int selfNumber = -1;
+        std::unordered_map<int, std::unordered_set<int>> neighbors;
 
         cMessage *updateMsgTimer = nullptr;
 
         void sendPacket(const Ptr<FSRControlPacket>& controlPacket);
         void clearState();
         L3Address getSelfIPAddress() const;
+
+        void printNeighbors();
+        const Ptr<FSRUpdatePacket> createUpdatePacket();
+        void handleUpdatePacket(const Ptr<const FSRUpdatePacket>& updatePacket);
 
     protected:
         void initialize(int stage) override;
@@ -99,55 +99,12 @@ void FSR::initialize(int stage)
     }
 }
 
-void FSR::clearState()
-{
-    cancelEvent(this->helloMsgTimer);
-}
-
-void FSR::handleMessageWhenUp(cMessage *msg)
-{
-    EV_INFO << "FSR received message: " << msg->getName() << endl;
-
-    if (msg->isSelfMessage()) {
-        if (msg == updateMsgTimer) {
-            // Create and send a hello message
-            auto controlPacket = makeShared<FSRUpdatePacket>();
-            controlPacket->setPacketType(FSRControlPacketType::UPDATE);
-            controlPacket->setChunkLength(B(20));
-
-            controlPacket->setNeighbors(this->nodeNeighbors);
-
-            sendPacket(controlPacket);
-            // scheduleAfter(5, helloMsgTimer);
-        } else {
-            throw cRuntimeError("Unknown self message: %s", msg->getName());
-        }
-    } else {
-        this->socket.processMessage(msg);
-    }
-}
-
-void FSR::socketDataArrived(UdpSocket *socket, Packet *packet)
-{
-    EV_INFO << "FSR received packet: " << packet->getName() << endl;
-    // L3Address sourceAddr = packet->getTag<L3AddressInd>()->getSrcAddress();
-    // const auto& fsrPacket = packet->popAtFront<FSRControlPacket>();
-}
-
-void FSR::socketErrorArrived(UdpSocket *socket, Indication *indication)
-{
-    EV_WARN << "Ignoring UDP error report " << indication->getName() << endl;
-    delete indication;
-}
-
-void FSR::socketClosed(UdpSocket *socket)
-{
-}
 
 void FSR::handleStartOperation(LifecycleOperation *operation)
 {
     auto selfAddress = getSelfIPAddress();
-    this->addressType = selfAddress.getAddressType();
+    auto selfAddressNumber = selfAddress.toIpv4().getDByte(3);
+    this->selfNumber = selfAddressNumber;
 
     const char *neighborsStr = par("neighbors");
     cStringTokenizer tokenizer(neighborsStr);
@@ -156,51 +113,20 @@ void FSR::handleStartOperation(LifecycleOperation *operation)
     while ((token = tokenizer.nextToken()) != nullptr) {
         L3Address result;
         L3AddressResolver().tryResolve(token, result);
-        this->neighbors.insert(result.str());
+        auto number = result.toIpv4().getDByte(3);
+        this->neighbors[selfAddressNumber].insert(number);
+        this->neighbors[number].insert(selfAddressNumber);
     }
 
-    auto selfAddressStr = selfAddress.str();
-    this->nodeDist.insert({selfAddressStr, 0});
-    this->nodeNextHop.insert({selfAddressStr, selfAddressStr});
-    this->nodeNeighbors.insert({selfAddressStr, this->neighbors});
-    for (const auto& neighbor : this->neighbors) {
-        this->nodeDist.insert({neighbor, 1});
-        this->nodeNextHop.insert({neighbor, neighbor});
-        this->nodeNeighbors.insert({neighbor, std::unordered_set<std::string>()});
-        this->nodeNeighbors[neighbor].insert(selfAddressStr);
-    }
-
-    EV_INFO << "Self Address: " << selfAddressStr << endl;
-    EV_INFO << "Neighbors: ";
-    for (const auto& neighbor : this->neighbors) {
-        EV_INFO << neighbor << " ";
-    }
-    EV_INFO << endl;
-
-    EV_INFO << "Node Distances: " << endl;
-    for (const auto& [node, dist] : this->nodeDist) {
-        EV_INFO << "  " << node << ": " << dist << endl;
-    }
-    EV_INFO << "Node Next Hops: " << endl;
-    for (const auto& [node, nextHop] : this->nodeNextHop) {
-        EV_INFO << "  " << node << ": " << nextHop << endl;
-    }
-    EV_INFO << "Node Neighbors: " << endl;
-    for (const auto& [node, neighbors] : this->nodeNeighbors) {
-        EV_INFO << "  " << node << ": ";
-        for (const auto& neighbor : neighbors) {
-            EV_INFO << neighbor << " ";
-        }
-        EV_INFO << endl;
-    }
-    EV_INFO << "FSR initialized successfully." << endl;
+    EV_INFO << "FSR: " <<  selfAddressNumber << " initialized with neighbors: " << this->neighbors.size() << endl;
+    this->printNeighbors();
 
     this->socket.setOutputGate(gate("socketOut"));
     this->socket.bind(L3Address(), 3040);
     this->socket.setBroadcast(true);
     this->socket.setCallback(this);
 
-    scheduleAfter(10.0, helloMsgTimer);
+    scheduleAfter(5.0 + this->selfNumber, this->updateMsgTimer);
 }
 
 void FSR::handleStopOperation(LifecycleOperation *operation)
@@ -215,16 +141,55 @@ void FSR::handleCrashOperation(LifecycleOperation *operation)
     this->clearState();
 }
 
+void FSR::clearState()
+{
+    cancelEvent(this->updateMsgTimer);
+}
+
+void FSR::handleMessageWhenUp(cMessage *msg)
+{
+    EV_INFO << "FSR received message: " << msg->getName() << endl;
+
+    if (!msg->isSelfMessage()) this->socket.processMessage(msg);
+
+    if (msg == this->updateMsgTimer) {
+        auto packet = createUpdatePacket();
+
+        sendPacket(packet);
+    }
+}
+
+void FSR::socketDataArrived(UdpSocket *socket, Packet *packet)
+{
+    EV_INFO << "FSR received packet: " << packet->getName() << endl;
+
+    if (strcmp(packet->getName(), "FSRUpdatePacket") == 0) {
+        auto updatePacket = packet->popAtFront<FSRUpdatePacket>();
+        handleUpdatePacket(updatePacket);
+    }
+}
+
+void FSR::socketErrorArrived(UdpSocket *socket, Indication *indication)
+{
+    EV_WARN << "Ignoring UDP error report " << indication->getName() << endl;
+    delete indication;
+}
+
+void FSR::socketClosed(UdpSocket *socket)
+{
+    this->clearState();
+}
+
 void FSR::sendPacket(const Ptr<FSRControlPacket>& controlPacket) {
     const char *className = controlPacket->getClassName();
 
-    Packet *packet = new Packet(!strncmp("inet::", className, 6) ? className + 6 : className, controlPacket);
-    L3Address result;
-    L3AddressResolver().tryResolve("145.236.0.2", result);
-
-    for (const auto& neighbor : this->neighbors) {
+    for (const auto& neighbor : this->neighbors[this->selfNumber]) {
+        std::string address = "145.236.1." + std::to_string(neighbor);
         L3Address destAddress;
-        L3AddressResolver().tryResolve(neighbor.c_str(), destAddress);
+        L3AddressResolver().tryResolve(address.c_str(), destAddress);
+
+        Packet *packet = new Packet(!strncmp("inet::", className, 6) ? className + 6 : className, controlPacket);
+
         packet->addTag<L3AddressReq>()->setDestAddress(destAddress);
         packet->addTag<L4PortReq>()->setDestPort(3040);
         packet->addTag<HopLimitReq>()->setHopLimit(MAX_INT);
@@ -232,6 +197,55 @@ void FSR::sendPacket(const Ptr<FSRControlPacket>& controlPacket) {
         EV_INFO << "Sending packet: " << packet->getName() << " to " << destAddress << endl;
 
         this->socket.send(packet);
+    }
+}
+
+const Ptr<FSRUpdatePacket> FSR::createUpdatePacket()
+{
+    auto updatePacket = makeShared<FSRUpdatePacket>();
+    updatePacket->setPacketType(FSRControlPacketType::UPDATE);
+    updatePacket->setChunkLength(B(20));
+
+    std::vector<FSRRoute> routes;
+    for (const auto& neighbor : this->neighbors) {
+        for (const auto& n : neighbor.second) {
+            FSRRoute route;
+            route.source = neighbor.first;
+            route.target = n;
+            routes.push_back(route);
+        }
+    }
+    updatePacket->setRoutesArraySize(routes.size());
+    for (size_t i = 0; i < routes.size(); ++i) {
+        updatePacket->setRoutes(i, routes[i]);
+    }
+
+    return updatePacket;
+}
+
+void FSR::handleUpdatePacket(const Ptr<const FSRUpdatePacket>& updatePacket)
+{
+    EV_INFO << "FSR received update packet with " << updatePacket->getRoutesArraySize() << " routes." << endl;
+
+    for (int i = 0; i < updatePacket->getRoutesArraySize(); ++i) {
+        const FSRRoute& route = updatePacket->getRoutes(i);
+
+        this->neighbors[route.source].insert(route.target);
+        this->neighbors[route.target].insert(route.source);
+    }
+
+    this->printNeighbors();
+}
+
+void FSR::printNeighbors()
+{
+    EV_INFO << "FSR Neighbors for node " << this->selfNumber << ":" << endl;
+    for (const auto& neighbor : this->neighbors) {
+        EV_INFO << "Neighbor: " << neighbor.first << " -> ";
+        for (const auto& n : neighbor.second) {
+            EV_INFO << n << " ";
+        }
+        EV_INFO << endl;
     }
 }
 

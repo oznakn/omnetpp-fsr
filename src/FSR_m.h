@@ -31,7 +31,8 @@
 namespace inet {
 
 class FSRControlPacket;
-class FSRHelloControlPacket;
+struct FSRRoute;
+class FSRUpdatePacket;
 
 }  // namespace inet
 
@@ -51,12 +52,12 @@ namespace inet {
  * <pre>
  * enum FSRControlPacketType
  * {
- *     HELLO = 1;
+ *     UPDATE = 1;
  * }
  * </pre>
  */
 enum FSRControlPacketType {
-    HELLO = 1
+    UPDATE = 1
 };
 
 inline void doParsimPacking(omnetpp::cCommBuffer *b, const FSRControlPacketType& e) { b->pack(static_cast<int>(e)); }
@@ -99,35 +100,65 @@ inline void doParsimPacking(omnetpp::cCommBuffer *b, const FSRControlPacket& obj
 inline void doParsimUnpacking(omnetpp::cCommBuffer *b, FSRControlPacket& obj) {obj.parsimUnpack(b);}
 
 /**
- * Class generated from <tt>inet/routing/fsr/FSR.msg:19</tt> by opp_msgtool.
+ * Struct generated from inet/routing/fsr/FSR.msg:19 by opp_msgtool.
+ */
+struct INET_API FSRRoute
+{
+    FSRRoute();
+    int source = 0;
+    int target = 0;
+};
+
+// helpers for local use
+void INET_API __doPacking(omnetpp::cCommBuffer *b, const FSRRoute& a);
+void INET_API __doUnpacking(omnetpp::cCommBuffer *b, FSRRoute& a);
+
+inline void doParsimPacking(omnetpp::cCommBuffer *b, const FSRRoute& obj) { __doPacking(b, obj); }
+inline void doParsimUnpacking(omnetpp::cCommBuffer *b, FSRRoute& obj) { __doUnpacking(b, obj); }
+
+/**
+ * Class generated from <tt>inet/routing/fsr/FSR.msg:25</tt> by opp_msgtool.
  * <pre>
- * class FSRHelloControlPacket extends FSRControlPacket
+ * class FSRUpdatePacket extends FSRControlPacket
  * {
+ *     FSRRoute routes[];
  * }
  * </pre>
  */
-class INET_API FSRHelloControlPacket : public ::inet::FSRControlPacket
+class INET_API FSRUpdatePacket : public ::inet::FSRControlPacket
 {
   protected:
+    FSRRoute *routes = nullptr;
+    size_t routes_arraysize = 0;
 
   private:
-    void copy(const FSRHelloControlPacket& other);
+    void copy(const FSRUpdatePacket& other);
 
   protected:
-    bool operator==(const FSRHelloControlPacket&) = delete;
+    bool operator==(const FSRUpdatePacket&) = delete;
 
   public:
-    FSRHelloControlPacket();
-    FSRHelloControlPacket(const FSRHelloControlPacket& other);
-    virtual ~FSRHelloControlPacket();
-    FSRHelloControlPacket& operator=(const FSRHelloControlPacket& other);
-    virtual FSRHelloControlPacket *dup() const override {return new FSRHelloControlPacket(*this);}
+    FSRUpdatePacket();
+    FSRUpdatePacket(const FSRUpdatePacket& other);
+    virtual ~FSRUpdatePacket();
+    FSRUpdatePacket& operator=(const FSRUpdatePacket& other);
+    virtual FSRUpdatePacket *dup() const override {return new FSRUpdatePacket(*this);}
     virtual void parsimPack(omnetpp::cCommBuffer *b) const override;
     virtual void parsimUnpack(omnetpp::cCommBuffer *b) override;
+
+    virtual void setRoutesArraySize(size_t size);
+    virtual size_t getRoutesArraySize() const;
+    virtual const FSRRoute& getRoutes(size_t k) const;
+    virtual FSRRoute& getRoutesForUpdate(size_t k) { handleChange();return const_cast<FSRRoute&>(const_cast<FSRUpdatePacket*>(this)->getRoutes(k));}
+    virtual void setRoutes(size_t k, const FSRRoute& routes);
+    virtual void insertRoutes(size_t k, const FSRRoute& routes);
+    [[deprecated]] void insertRoutes(const FSRRoute& routes) {appendRoutes(routes);}
+    virtual void appendRoutes(const FSRRoute& routes);
+    virtual void eraseRoutes(size_t k);
 };
 
-inline void doParsimPacking(omnetpp::cCommBuffer *b, const FSRHelloControlPacket& obj) {obj.parsimPack(b);}
-inline void doParsimUnpacking(omnetpp::cCommBuffer *b, FSRHelloControlPacket& obj) {obj.parsimUnpack(b);}
+inline void doParsimPacking(omnetpp::cCommBuffer *b, const FSRUpdatePacket& obj) {obj.parsimPack(b);}
+inline void doParsimUnpacking(omnetpp::cCommBuffer *b, FSRUpdatePacket& obj) {obj.parsimUnpack(b);}
 
 
 }  // namespace inet
@@ -136,7 +167,9 @@ inline void doParsimUnpacking(omnetpp::cCommBuffer *b, FSRHelloControlPacket& ob
 namespace omnetpp {
 
 template<> inline inet::FSRControlPacket *fromAnyPtr(any_ptr ptr) { return check_and_cast<inet::FSRControlPacket*>(ptr.get<cObject>()); }
-template<> inline inet::FSRHelloControlPacket *fromAnyPtr(any_ptr ptr) { return check_and_cast<inet::FSRHelloControlPacket*>(ptr.get<cObject>()); }
+inline any_ptr toAnyPtr(const inet::FSRRoute *p) {return any_ptr(p);}
+template<> inline inet::FSRRoute *fromAnyPtr(any_ptr ptr) { return ptr.get<inet::FSRRoute>(); }
+template<> inline inet::FSRUpdatePacket *fromAnyPtr(any_ptr ptr) { return check_and_cast<inet::FSRUpdatePacket*>(ptr.get<cObject>()); }
 
 }  // namespace omnetpp
 
