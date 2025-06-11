@@ -1,0 +1,5 @@
+<scenario>
+    <at t="5">
+        <shutdown module="hostC"/>
+    </at>
+</scenario>
