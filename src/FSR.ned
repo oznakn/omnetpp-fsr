@@ -8,6 +8,7 @@ simple FSR
         string neighbors = default("");
 
         string routingTableModule = default("^.ipv4.routingTable");
+        string interfaceTableModule = default("^.interfaceTable");
 
     gates:
         input socketIn;

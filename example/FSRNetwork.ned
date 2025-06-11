@@ -11,7 +11,7 @@ import inet.routing.fsr.FSRRouter;
 network FSRNetwork
 {
     parameters:
-        int numHosts = default(2);
+        // int numHosts = default(2);
         @display("bgb=650,650");
     submodules:
         radioMedium: UnitDiskRadioMedium {
@@ -20,21 +20,32 @@ network FSRNetwork
         }
         configurator: Ipv4NetworkConfigurator {
             parameters:
+                addDefaultRoutes = false;
+                addStaticRoutes = false;
+                addSubnetRoutes = false;
                 config = xml("<config><interface hosts='*' address='145.236.1.x' netmask='255.255.0.0'/></config>");
                 @display("p=100,100;is=s");
         }
-        // routingTableRecorder: RoutingTableRecorder {
-        //     parameters:
-        //         @display("p=100,300;is=s");
-        // }
-        // scenarioManager: ScenarioManager {
-        //     parameters:
-        //         script = default(xml("<scenario/>"));
-        //         @display("p=100,400;is=s");
-        // }
-        host[numHosts]: FSRRouter {
+        routingTableRecorder: RoutingTableRecorder {
             parameters:
-                @display("p=100,300");
+                @display("p=100,300;is=s");
+        }
+        scenarioManager: ScenarioManager {
+            parameters:
+                script = default(xml("<scenario/>"));
+                @display("p=100,400;is=s");
+        }
+        hostA: FSRRouter {
+            parameters:
+                @display("p=300,300");
+        }
+        hostB: FSRRouter {
+            parameters:
+                @display("p=300,400");
+        }
+        hostC: FSRRouter {
+            parameters:
+                @display("p=300,500");
         }
     connections allowunconnected:
 }

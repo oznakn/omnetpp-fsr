@@ -5,7 +5,7 @@ package inet.routing.fsr;
 import inet.node.inet.AdhocHost;
 import inet.node.inet.WirelessHost;
 
-module FSRRouter extends WirelessHost
+module FSRRouter extends AdhocHost
 {
     submodules:
         fsr: FSR {
