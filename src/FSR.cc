@@ -126,71 +126,29 @@ void FSR::handleStartOperation(LifecycleOperation *operation)
     this->addressType =selfAddress.getAddressType();
     this->selfNumber = selfAddressNumber;
 
-    // {
-    //     L3Address startAddress = this->getAddressFromNumber(1);
-    //     L3Address destAddress = this->getAddressFromNumber(2);
-    //     IRoute *destRoute = routingTable->findBestMatchingRoute(destAddress);
-    //     destRoute->setFrom(startAddress);
-    //     destRoute->setNextHop(startAddress);
-    //     destRoute->setMetric(1);
-    // }
+    const char *neighborsStr = par("neighbors");
+    cStringTokenizer tokenizer(neighborsStr);
+    const char *token;
 
-    // {
-    //     L3Address startAddress = this->getAddressFromNumber(2);
-    //     L3Address destAddress = this->getAddressFromNumber(3);
-    //     IRoute *destRoute = routingTable->findBestMatchingRoute(destAddress);
-    //     destRoute->setFrom(startAddress);
-    //     destRoute->setNextHop(startAddress);
-    //     destRoute->setMetric(1);
-    // }
-
-
-    if (this->selfNumber == 1) {
-        L3Address destAddress = this->getAddressFromNumber(3);
-        L3Address midAddress = this->getAddressFromNumber(2);
-        IRoute *destRoute = routingTable->createRoute();
-        destRoute->setDestination(destAddress);
-        destRoute->setNextHop(midAddress);
-        destRoute->setPrefixLength(this->addressType->getMaxPrefixLength());
-        destRoute->setMetric(1);
-        destRoute->setInterface(this->ifEntry);
-
-        destRoute->setSource(this);
-        routingTable->addRoute(destRoute);
+    while ((token = tokenizer.nextToken()) != nullptr) {
+        L3Address result;
+        L3AddressResolver().tryResolve(token, result);
+        auto number = result.toIpv4().getDByte(3);
+        this->neighbors[selfAddressNumber].insert(number);
+        this->neighbors[number].insert(selfAddressNumber);
     }
 
-    this->routingTable->printRoutingTable();
+    EV_INFO << "FSR: " <<  selfAddressNumber << " initialized with neighbors: " << this->neighbors.size() << endl;
+    this->printNeighbors();
 
-    // if (this->selfNumber == 3) {
-    //     L3Address destAddress = this->getAddressFromNumber(1);
-    //     L3Address midAddress = this->getAddressFromNumber(2);
-    //     IRoute *destRoute = routingTable->findBestMatchingRoute(destAddress);
-    //     destRoute->setNextHop(midAddress);
-    //     destRoute->setMetric(1);
-    //     destRoute->setSource(this);
-    // }
+    this->socket.setOutputGate(gate("socketOut"));
+    this->socket.bind(L3Address(), 3040);
+    this->socket.setBroadcast(true);
+    this->socket.setCallback(this);
 
-    // const char *neighborsStr = par("neighbors");
-    // cStringTokenizer tokenizer(neighborsStr);
-    // const char *token;
-
-    // while ((token = tokenizer.nextToken()) != nullptr) {
-    //     L3Address result;
-    //     L3AddressResolver().tryResolve(token, result);
-    //     auto number = result.toIpv4().getDByte(3);
-    //     this->neighbors[selfAddressNumber].insert(number);
-    //     this->neighbors[number].insert(selfAddressNumber);
-    // }
-
-    // EV_INFO << "FSR: " <<  selfAddressNumber << " initialized with neighbors: " << this->neighbors.size() << endl;
-    // this->printNeighbors();
-
-    // this->socket.setOutputGate(gate("socketOut"));
-    // this->socket.bind(L3Address(), 3040);
-    // this->socket.setBroadcast(true);
-    // this->socket.setCallback(this);
-
-    // scheduleAfter(5.0 + this->selfNumber, this->updateMsgTimer);
+    if (this->selfNumber == 2) {
+        scheduleAfter(5.0 + this->selfNumber, this->updateMsgTimer);
+    }
 }
 
 void FSR::handleStopOperation(LifecycleOperation *operation)
@@ -311,34 +269,54 @@ void FSR::handleUpdatePacket(const Ptr<const FSRUpdatePacket>& updatePacket)
 
         this->neighbors[route.source].insert(route.target);
         this->neighbors[route.target].insert(route.source);
-
-        // auto sourceAddress = this->getAddressFromNumber(route.source);
-        // auto targetAddress = this->getAddressFromNumber(route.target);
     }
 
-    // add routes to routing table
-    for (const auto& neighbor : this->neighbors) {
-        for (const auto& n : neighbor.second) {
-            IRoute *route = routingTable->findBestMatchingRoute(this->getAddressFromNumber(n));
+    std::vector<std::pair<int, int>> newDestinations;
 
-            if (!route) {
-                route = routingTable->createRoute();
-                route->setDestination(this->getAddressFromNumber(n));
-                route->setNextHop(this->getAddressFromNumber(neighbor.first));
-                route->setMetric(1);
-                route->setSource(this);
-                routingTable->addRoute(route);
-            } else if (route->getNextHopAsGeneric().isUnspecified()) {
-                route->setNextHop(this->getAddressFromNumber(neighbor.first));
-                route->setMetric(1);
-                route->setSource(this);
+    for (const auto& neighbor : this->neighbors[this->selfNumber]) {
+        std::unordered_set<int> visitedNeighbors;
+        visitedNeighbors.insert(this->selfNumber);
 
-                EV_INFO << "Updated route for " << this->getAddressFromNumber(n) << " via " << this->getAddressFromNumber(neighbor.first) << endl;
+        std::vector<int> toVisit;
+        toVisit.push_back(neighbor);
+
+        // Perform a BFS to discover all neighbors
+        while (!toVisit.empty()) {
+            int current = toVisit.back();
+            toVisit.pop_back();
+
+            if (visitedNeighbors.find(current) != visitedNeighbors.end()) {
+                continue; // Already visited
+            }
+
+            visitedNeighbors.insert(current);
+            newDestinations.push_back({neighbor, current});
+
+            for (const auto& neighbor : this->neighbors[current]) {
+                if (visitedNeighbors.find(neighbor) == visitedNeighbors.end()) {
+                    toVisit.push_back(neighbor);
+                }
             }
         }
     }
 
-    this->printNeighbors();
+    for (const auto& dest : newDestinations) {
+        EV_INFO << "Adding route from " << dest.first << " to " << dest.second << endl;
+
+        IRoute *route = routingTable->createRoute();
+        route->setDestination(this->getAddressFromNumber(dest.second));
+        route->setNextHop(this->getAddressFromNumber(dest.first));
+        route->setMetric(1);
+
+        route->setInterface(this->ifEntry);
+        route->setPrefixLength(this->addressType->getMaxPrefixLength());
+        route->setSource(this);
+
+        this->routingTable->addRoute(route);
+    }
+
+    // this->printNeighbors();
+    this->routingTable->printRoutingTable();
 }
 
 void FSR::printNeighbors()
