@@ -31,21 +31,22 @@
 #include "inet/transportlayer/contract/udp/UdpControlInfo.h"
 
 #define MAX_INT 1000
-#define DEAD_CHECK_INTERVAL 5.0 // seconds
-#define DEAD_CHECK_THRESHOLD 5.0 // seconds
 
 namespace inet {
 
-class INET_API FSR : public RoutingProtocolBase, public UdpSocket::ICallback, public cListener
+class INET_API FSR : public RoutingProtocolBase, public NetfilterBase::HookBase, public UdpSocket::ICallback, public cListener
 {
     private:
         double updateInterval = 1.0;
+        double deadCheckInterval = 5.0;
+        double deadCheckThreshold = 10.0;
 
         const IL3AddressType *addressType = nullptr;
         NetworkInterface *ifEntry = nullptr;
 
         ModuleRefByPar<IRoutingTable> routingTable;
         ModuleRefByPar<IInterfaceTable> interfaceTable;
+        ModuleRefByPar<INetfilter> networkProtocol;
         UdpSocket socket;
 
         int selfNumber = -1;
@@ -82,6 +83,14 @@ class INET_API FSR : public RoutingProtocolBase, public UdpSocket::ICallback, pu
         virtual void handleStopOperation(LifecycleOperation *operation) override;
         virtual void handleCrashOperation(LifecycleOperation *operation) override;
 
+        /* Netfilter hooks */
+        Result ensureRouteForDatagram(Packet *datagram);
+        virtual Result datagramPreRoutingHook(Packet *datagram) override { Enter_Method("datagramPreRoutingHook"); return ensureRouteForDatagram(datagram); }
+        virtual Result datagramForwardHook(Packet *datagram) override;
+        virtual Result datagramPostRoutingHook(Packet *datagram) override { return ACCEPT; }
+        virtual Result datagramLocalInHook(Packet *datagram) override { return ACCEPT; }
+        virtual Result datagramLocalOutHook(Packet *datagram) override { Enter_Method("datagramLocalOutHook"); return ensureRouteForDatagram(datagram); }
+
     public:
         FSR();
         virtual ~FSR();
@@ -107,12 +116,17 @@ void FSR::initialize(int stage)
 
     if (stage == INITSTAGE_LOCAL) {
         this->updateInterval = par("updateInterval").doubleValue();
+        this->deadCheckInterval = par("deadCheckInterval").doubleValue();
+        this->deadCheckThreshold = par("deadCheckThreshold").doubleValue();
 
         this->routingTable.reference(this, "routingTableModule", true);
         this->interfaceTable.reference(this, "interfaceTableModule", true);
+        this->networkProtocol.reference(this, "networkProtocolModule", true);
 
         this->updateMsgTimer = new cMessage("updateMsgTimer");
         this->deadCheckMsgTimer = new cMessage("deadCheckMsgTimer");
+    } else if (stage == INITSTAGE_ROUTING_PROTOCOLS) {
+        networkProtocol->registerHook(0, this);
     }
 }
 
@@ -147,7 +161,7 @@ void FSR::handleStartOperation(LifecycleOperation *operation)
     this->socket.setCallback(this);
 
     scheduleAfter(1.0 + this->selfNumber, this->updateMsgTimer);
-    scheduleAfter(DEAD_CHECK_INTERVAL, this->deadCheckMsgTimer);
+    scheduleAfter(this->deadCheckInterval, this->deadCheckMsgTimer);
 }
 
 void FSR::handleStopOperation(LifecycleOperation *operation)
@@ -179,8 +193,10 @@ void FSR::handleMessageWhenUp(cMessage *msg)
 
         // Check for dead neighbors
         simtime_t now = simTime();
+
         for (auto it = lastNodeUpdateTimes.begin(); it != lastNodeUpdateTimes.end(); it++) {
-            if (now - it->second > DEAD_CHECK_THRESHOLD) {
+            EV_INFO << "Checking last update time for node " << it->first << ": " << it->second << " and now " << now << endl;
+            if (now - it->second > this->deadCheckThreshold) {
                 int deadNodeNumber = it->first;
                 EV_INFO << "Node " << deadNodeNumber << " is considered dead." << endl;
                 deadNodes.insert(deadNodeNumber);
@@ -193,10 +209,11 @@ void FSR::handleMessageWhenUp(cMessage *msg)
                 this->handleDeadNode(deadNode);
             }
 
-            this->routingTable->printRoutingTable();
+            if (this->selfNumber == 1)
+                this->routingTable->printRoutingTable();
         }
 
-        scheduleAfter(DEAD_CHECK_INTERVAL, this->deadCheckMsgTimer);
+        scheduleAfter(this->deadCheckInterval, this->deadCheckMsgTimer);
     }
 
     if (msg == this->updateMsgTimer) {
@@ -206,7 +223,7 @@ void FSR::handleMessageWhenUp(cMessage *msg)
             this->updateMsgTimerCounter = 0;
         }
 
-        // scope=2;
+        scope=2;
         auto packet = createUpdatePacket(scope);
 
         sendPacket(packet);
@@ -218,7 +235,7 @@ void FSR::handleMessageWhenUp(cMessage *msg)
 
 void FSR::socketDataArrived(UdpSocket *socket, Packet *packet)
 {
-    EV_INFO << "FSR received packet: " << packet->getName() << endl;
+    // EV_INFO << "FSR received packet: " << packet->getName() << endl;
 
     if (strcmp(packet->getName(), "FSRUpdatePacket") == 0) {
         // packet source ip
@@ -228,6 +245,8 @@ void FSR::socketDataArrived(UdpSocket *socket, Packet *packet)
         auto updatePacket = packet->popAtFront<FSRUpdatePacket>();
         handleUpdatePacket(srcAddressNumber, updatePacket);
     }
+
+    delete packet;
 }
 
 void FSR::socketErrorArrived(UdpSocket *socket, Indication *indication)
@@ -253,7 +272,7 @@ void FSR::sendPacket(const Ptr<FSRControlPacket>& controlPacket) {
         packet->addTag<L4PortReq>()->setDestPort(3040);
         packet->addTag<HopLimitReq>()->setHopLimit(MAX_INT);
 
-        EV_INFO << "Sending packet " << packet->getName() << " from " << this->selfNumber << " to " << destAddress << endl;
+        // EV_INFO << "Sending packet " << packet->getName() << " from " << this->selfNumber << " to " << destAddress << endl;
 
         this->socket.send(packet);
     }
@@ -303,11 +322,23 @@ void FSR::handleDeadNode(int nodeNumber)
         neighbor.second.erase(nodeNumber);
     }
 
-    // Remove routes to the dead node
-    auto route = this->routingTable->findBestMatchingRoute(this->getAddressFromNumber(nodeNumber));
-    if (route != nullptr && !route->getNextHopAsGeneric().isUnspecified()) {
-        this->routingTable->removeRoute(route);
-        EV_INFO << "Removed route to dead node: " << nodeNumber << endl;
+    auto prefixLength = this->addressType->getMaxPrefixLength();
+
+    for (int i = 0; i < routingTable->getNumRoutes(); i++) {
+        IRoute *route = routingTable->getRoute(i);
+        if (route->getPrefixLength() != prefixLength) {
+            continue; // Only consider routes with the full prefix length
+        }
+
+        auto destAddress = route->getDestinationAsGeneric().toIpv4();
+        auto midAddress = route->getNextHopAsGeneric().toIpv4();
+        auto destNumber = destAddress.getDByte(3);
+        auto midNumber = midAddress.getDByte(3);
+
+        if (destNumber == nodeNumber || midNumber == nodeNumber) {
+            EV_INFO << "Removing route to dead node: " << nodeNumber << " from route to " << destNumber << endl;
+            routingTable->removeRoute(route);
+        }
     }
 }
 
@@ -315,6 +346,8 @@ void FSR::handleUpdatePacket(int srcNumber, const Ptr<const FSRUpdatePacket>& up
 {
     auto now = simTime();
     lastNodeUpdateTimes[srcNumber] = now;
+
+    EV_INFO << "Received update packet from node " << srcNumber << " at time " << now << endl;
 
     for (int i = 0; i < updatePacket->getRoutesArraySize(); ++i) {
         const FSRRoute& route = updatePacket->getRoutes(i);
@@ -378,16 +411,16 @@ void FSR::updateRoutingTable()
     bool hasChanged = false;
 
     for (const auto& dest : destinations) {
-        EV_INFO << "Adding route via " << dest[0] << " to " << dest[1] << " with distance of " << dest[2] << endl;
+        // EV_INFO << "Adding route via " << dest[0] << " to " << dest[1] << " with distance of " << dest[2] << endl;
 
         auto midAddress = this->getAddressFromNumber(dest[0]);
         auto destAddress = this->getAddressFromNumber(dest[1]);
 
+        bool newRoute = false;
         IRoute *route = routingTable->findBestMatchingRoute(destAddress);
-        if (route == nullptr) {
+        if (route == nullptr || route->getNextHopAsGeneric().isUnspecified()) {
             route = this->routingTable->createRoute();
-        } else if (route->getNextHopAsGeneric().isUnspecified()) {
-            route = this->routingTable->createRoute();
+            newRoute = true;
         } else if (route->getMetric() <= dest[2]) {
             continue; // Existing route is better or equal
         }
@@ -401,11 +434,14 @@ void FSR::updateRoutingTable()
         route->setPrefixLength(this->addressType->getMaxPrefixLength());
         route->setSource(this);
 
-        this->routingTable->addRoute(route);
+        if (newRoute) {
+            this->routingTable->addRoute(route);
+        }
     }
 
     if (hasChanged) {
-        this->routingTable->printRoutingTable();
+        if (this->selfNumber == 1)
+            this->routingTable->printRoutingTable();
     }
 }
 
@@ -435,5 +471,32 @@ L3Address FSR::getSelfIPAddress() const
 {
     return this->routingTable->getRouterIdAsGeneric();
 }
+
+INetfilter::IHook::Result FSR::ensureRouteForDatagram(Packet *packet)
+{
+    // auto srcAddress = packet->getTag<L3AddressInd>()->getSrcAddress();
+    // auto destAddress = packet->getTag<L3AddressReq>()->getDestAddress();
+
+    // if (destAddress.isBroadcast() || routingTable->isLocalAddress(destAddress) || destAddress.isMulticast())
+    //     return ACCEPT;
+    // else {
+    //     IRoute *route = routingTable->findBestMatchingRoute(destAddress);
+
+    //     if (route && !route->getNextHopAsGeneric().isUnspecified()) {
+    //         return ACCEPT;
+    //     } else {
+    //         return QUEUE;
+    //     }
+    // }
+    return ACCEPT;
+}
+
+
+INetfilter::IHook::Result FSR::datagramForwardHook(Packet *packet)
+{
+    Enter_Method("datagramForwardHook");
+    return ACCEPT;
+}
+
 
 }

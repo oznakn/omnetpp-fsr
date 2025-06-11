@@ -11,8 +11,10 @@ import inet.routing.fsr.FSRRouter;
 network FSRNetwork
 {
     parameters:
-        // int numHosts = default(2);
         @display("bgb=650,650");
+
+        @figure[rcvdPkText](type=indicatorText; pos=380,300; anchor=w; font=,18; textFormat="packets received: %g"; initialValue=0);
+        @statistic[packetReceived](source=hostD.app[0].packetReceived; record=figure(count); targetFigure=rcvdPkText);
     submodules:
         radioMedium: UnitDiskRadioMedium {
             parameters:
@@ -41,9 +43,13 @@ network FSRNetwork
         }
         hostB: FSRRouter {
             parameters:
-                @display("p=300,400");
+                @display("p=250,400");
         }
         hostC: FSRRouter {
+            parameters:
+                @display("p=350,400");
+        }
+        hostD: FSRRouter {
             parameters:
                 @display("p=300,500");
         }
