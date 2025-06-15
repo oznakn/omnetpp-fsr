@@ -26,28 +26,34 @@ TARGET_NAME = "UdpSink"
 NETWORK_ID_NAME = "network"
 
 SETUPS = [
+    # {
+    #     "folder": "topology-results",
+    #     "configs": [],
+    # },
+    # {
+    #     "folder": "bitrate-results",
+    #     "configs": [
+    #         "**.wlan[0].bitrate",
+    #     ]
+    # },
+    # {
+    #     "folder": "load-results",
+    #     "configs": [
+    #         "*.hostB.app[0].sendInterval",
+    #     ],
+    # },
+    # {
+    #     "folder": "mobility-results",
+    #     "configs": [
+    #         "*.hostB.mobility.speed"
+    #     ],
+    # },
     {
-        "folder": "topology-results",
-        "configs": [],
-    },
-    {
-        "folder": "bitrate-results",
+        "folder": "bitrate-topology-results",
         "configs": [
             "**.wlan[0].bitrate",
-        ]
-    },
-    {
-        "folder": "load-results",
-        "configs": [
-            "*.hostB.app[0].sendInterval",
         ],
     },
-    {
-        "folder": "mobility-results",
-        "configs": [
-            "*.hostB.mobility.speed"
-        ],
-    }
 ]
 
 MEASURES = {
@@ -86,7 +92,7 @@ CALCULATIONS = {
     }
 }
 
-BASE_PATH = pathlib.Path(__file__).parent.parent.parent.resolve()
+BASE_PATH = pathlib.Path(__file__).parent.parent.resolve()
 
 if __name__ == "__main__":
     for setup_config in SETUPS:
