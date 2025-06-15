@@ -213,7 +213,7 @@ void FSR::handleMessageWhenUp(cMessage *msg)
                 this->routingTable->printRoutingTable();
         }
 
-        // scheduleAfter(this->deadCheckInterval, this->deadCheckMsgTimer);
+        scheduleAfter(this->deadCheckInterval, this->deadCheckMsgTimer);
     }
 
     if (msg == this->updateMsgTimer) {
