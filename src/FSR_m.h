@@ -105,8 +105,8 @@ inline void doParsimUnpacking(omnetpp::cCommBuffer *b, FSRControlPacket& obj) {o
 struct INET_API FSRRoute
 {
     FSRRoute();
-    int source = 0;
-    int target = 0;
+    uint8_t source = 0;
+    uint8_t target = 0;
 };
 
 // helpers for local use

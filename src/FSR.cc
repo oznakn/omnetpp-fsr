@@ -213,7 +213,7 @@ void FSR::handleMessageWhenUp(cMessage *msg)
                 this->routingTable->printRoutingTable();
         }
 
-        scheduleAfter(this->deadCheckInterval, this->deadCheckMsgTimer);
+        // scheduleAfter(this->deadCheckInterval, this->deadCheckMsgTimer);
     }
 
     if (msg == this->updateMsgTimer) {
@@ -223,7 +223,7 @@ void FSR::handleMessageWhenUp(cMessage *msg)
             this->updateMsgTimerCounter = 0;
         }
 
-        scope=2;
+        // scope=2;
         auto packet = createUpdatePacket(scope);
 
         sendPacket(packet);
@@ -272,7 +272,9 @@ void FSR::sendPacket(const Ptr<FSRControlPacket>& controlPacket) {
         packet->addTag<L4PortReq>()->setDestPort(3040);
         packet->addTag<HopLimitReq>()->setHopLimit(MAX_INT);
 
-        // EV_INFO << "Sending packet " << packet->getName() << " from " << this->selfNumber << " to " << destAddress << endl;
+        EV_INFO << "Sending packet " << packet->getName() << " from " << this->selfNumber << " to " << destAddress << " with size " << packet->getBitLength() << endl;
+
+        emit(packetSentSignal, packet);
 
         this->socket.send(packet);
     }
@@ -282,7 +284,6 @@ const Ptr<FSRUpdatePacket> FSR::createUpdatePacket(int scope)
 {
     auto updatePacket = makeShared<FSRUpdatePacket>();
     updatePacket->setPacketType(FSRControlPacketType::UPDATE);
-    updatePacket->setChunkLength(B(20));
 
     std::unordered_set<int> visited;
 
@@ -293,7 +294,9 @@ const Ptr<FSRUpdatePacket> FSR::createUpdatePacket(int scope)
                 continue; // Only include self's neighbors for scope 1
             }
 
-            auto hash = neighbor.first * 10000 + n; // Simple hash to avoid duplicates
+            auto small = std::min(neighbor.first, n);
+            auto big = std::max(neighbor.first, n);
+            auto hash = big * 10000 + small; // Simple hash to avoid duplicates
             if (visited.find(hash) != visited.end()) {
                 continue; // Skip if already visited
             }
@@ -310,6 +313,8 @@ const Ptr<FSRUpdatePacket> FSR::createUpdatePacket(int scope)
     for (size_t i = 0; i < routes.size(); ++i) {
         updatePacket->setRoutes(i, routes[i]);
     }
+
+    updatePacket->setChunkLength(B(2 * routes.size()));
 
     return updatePacket;
 }

@@ -654,8 +654,8 @@ const char *FSRRouteDescriptor::getFieldTypeString(int field) const
         field -= base->getFieldCount();
     }
     static const char *fieldTypeStrings[] = {
-        "int",    // FIELD_source
-        "int",    // FIELD_target
+        "uint8_t",    // FIELD_source
+        "uint8_t",    // FIELD_target
     };
     return (field >= 0 && field < 2) ? fieldTypeStrings[field] : nullptr;
 }
@@ -740,8 +740,8 @@ std::string FSRRouteDescriptor::getFieldValueAsString(omnetpp::any_ptr object, i
     }
     FSRRoute *pp = omnetpp::fromAnyPtr<FSRRoute>(object); (void)pp;
     switch (field) {
-        case FIELD_source: return long2string(pp->source);
-        case FIELD_target: return long2string(pp->target);
+        case FIELD_source: return ulong2string(pp->source);
+        case FIELD_target: return ulong2string(pp->target);
         default: return "";
     }
 }
@@ -758,8 +758,8 @@ void FSRRouteDescriptor::setFieldValueAsString(omnetpp::any_ptr object, int fiel
     }
     FSRRoute *pp = omnetpp::fromAnyPtr<FSRRoute>(object); (void)pp;
     switch (field) {
-        case FIELD_source: pp->source = string2long(value); break;
-        case FIELD_target: pp->target = string2long(value); break;
+        case FIELD_source: pp->source = string2ulong(value); break;
+        case FIELD_target: pp->target = string2ulong(value); break;
         default: throw omnetpp::cRuntimeError("Cannot set field %d of class 'FSRRoute'", field);
     }
 }
@@ -774,8 +774,8 @@ omnetpp::cValue FSRRouteDescriptor::getFieldValue(omnetpp::any_ptr object, int f
     }
     FSRRoute *pp = omnetpp::fromAnyPtr<FSRRoute>(object); (void)pp;
     switch (field) {
-        case FIELD_source: return pp->source;
-        case FIELD_target: return pp->target;
+        case FIELD_source: return (omnetpp::intval_t)(pp->source);
+        case FIELD_target: return (omnetpp::intval_t)(pp->target);
         default: throw omnetpp::cRuntimeError("Cannot return field %d of class 'FSRRoute' as cValue -- field index out of range?", field);
     }
 }
@@ -792,8 +792,8 @@ void FSRRouteDescriptor::setFieldValue(omnetpp::any_ptr object, int field, int i
     }
     FSRRoute *pp = omnetpp::fromAnyPtr<FSRRoute>(object); (void)pp;
     switch (field) {
-        case FIELD_source: pp->source = omnetpp::checked_int_cast<int>(value.intValue()); break;
-        case FIELD_target: pp->target = omnetpp::checked_int_cast<int>(value.intValue()); break;
+        case FIELD_source: pp->source = omnetpp::checked_int_cast<uint8_t>(value.intValue()); break;
+        case FIELD_target: pp->target = omnetpp::checked_int_cast<uint8_t>(value.intValue()); break;
         default: throw omnetpp::cRuntimeError("Cannot set field %d of class 'FSRRoute'", field);
     }
 }

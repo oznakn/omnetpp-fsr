@@ -17,8 +17,8 @@ class FSRControlPacket extends FieldsChunk
 
 struct FSRRoute
 {
-    int source;
-    int target;
+    uint8_t source;
+    uint8_t target;
 }
 
 class FSRUpdatePacket extends FSRControlPacket
