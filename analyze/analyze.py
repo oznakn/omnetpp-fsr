@@ -17,18 +17,36 @@ def calculate_packet_delivery_ratio(data, configs):
     source_sent = float(data[f"{source}:packetSent"][0])
     return (target_received / source_sent * 100) if source_sent > 0 else 0
 
-NETWORKS = ["A", "B", "C", "D", "E", "F"]
+EXPERIMENTS = ["A", "B", "C", "D", "E", "F", "Mobility", "Load"]
 APPS = ["fsr", "app[0]"]
 
 SOURCE_TARGET_FINDER = ".app[0].typename"
 SOURCE_NAME = "UdpBasicApp"
 TARGET_NAME = "UdpSink"
+NETWORK_ID_NAME = "network"
 
-# CONFIGS = ["**.wlan[0].bitrate"]
 SETUPS = [
     {
         "folder": "topology-results",
         "configs": [],
+    },
+    {
+        "folder": "bitrate-results",
+        "configs": [
+            "**.wlan[0].bitrate",
+        ]
+    },
+    {
+        "folder": "load-results",
+        "configs": [
+            "*.hostB.app[0].sendInterval",
+        ],
+    },
+    {
+        "folder": "mobility-results",
+        "configs": [
+            "*.hostB.mobility.speed"
+        ],
     }
 ]
 
@@ -68,25 +86,31 @@ CALCULATIONS = {
     }
 }
 
-BASE_PATH = pathlib.Path(__file__).parent.parent.resolve()
+BASE_PATH = pathlib.Path(__file__).parent.parent.parent.resolve()
 
 if __name__ == "__main__":
     for setup_config in SETUPS:
         folder = setup_config["folder"]
-        base_path = f"{BASE_PATH}/example/{folder}"
-        filenames = os.listdir(base_path)
+        base_path = f"{BASE_PATH}/all-results/{folder}"
+        output_file = f"{BASE_PATH}/{folder}.txt"
 
-        for network in NETWORKS:
-            network_name = f"FSRNetwork{network}"
+        print("starting for", base_path, "and output file is", output_file)
+
+        filenames = os.listdir(base_path)
+        result_out = ""
+
+        for experiment in EXPERIMENTS:
+            experiment_name = f"FSRNetwork{experiment}"
 
             source = None
             target = None
+            network_name = None
 
             data = {}
             vec_assignment = {}
 
             for filename in filenames:
-                if '.vec' not in filename or not filename.startswith(network_name):
+                if '.vec' not in filename or not filename.startswith(experiment_name):
                     continue
 
                 filename = f"{base_path}/{filename}"
@@ -100,14 +124,21 @@ if __name__ == "__main__":
                     for line in lines:
                         if line.startswith("config"):
                             parts = line.split()
+
                             if SOURCE_TARGET_FINDER in parts[1]:
-                                if parts[2] == SOURCE_NAME:
+                                if parts[2] == SOURCE_NAME and source is None:
                                     source = parts[1].split(".")[1]
-                                elif parts[2] == TARGET_NAME:
+                                elif parts[2] == TARGET_NAME and target is None:
                                     target = parts[1].split(".")[1]
 
+                            elif parts[1] == NETWORK_ID_NAME and network_name is None:
+                                network_name = parts[2]
+
                             elif parts[1] in setup_config["configs"]:
-                                configs[parts[1].split(".")[-1]] = parts[2]
+                                kk = parts[1].split(".")[-1]
+
+                                if kk not in configs:
+                                    configs[kk] = parts[2]
 
                         elif line.startswith("vector"):
                             parts = line.split()
@@ -138,7 +169,7 @@ if __name__ == "__main__":
                 continue
 
             for config_key, group_data in data.items():
-                print("DATA FOR:", folder, network_name, config_key)
+                result_out += f"DATA FOR: {folder} {experiment_name} {config_key}\n"
 
                 results = {}
                 for k, v in group_data.items():
@@ -201,7 +232,9 @@ if __name__ == "__main__":
                     outputs[calc_key] = calc["f"](outputs, calculation_configs)
 
                 for key, (value, unit) in outputs.items():
-                    print(f"{key} = {value} {unit}")
+                    result_out += f"{key} = {value} {unit}\n"
 
+                result_out += "\n\n"
 
-                print("\n\n")
+        with open(output_file, "w") as file:
+            file.write(result_out)
